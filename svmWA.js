@@ -179,14 +179,15 @@ async function sendMessageToNumber(number, message, mediaPath) {
           const filename = path.basename(mediaPath);
           const media = new MessageMedia(mimeType, base64File, filename);
       
-          console.log("📎 Media constructed:", {
+          console.log("Media constructed:", {
             filename,
             mimeType,
             sizeKB: (base64File.length / 1024).toFixed(2)
           });
       
-          await chat.sendMessage(media, { sendMediaAsDocument: true });
+          await chat.sendMessage(media,{ sendMediaAsDocument: true });
           await chat.sendMessage(message);
+          console.log('Message sent with media:', message);
       
         } catch (err) {
           console.error('Error handling media file:', err);
@@ -239,10 +240,15 @@ async function sendApiMessage(grpName, msgText, msgMedia) {
                 }
 
                 // Create MessageMedia from the file
-                const media = MessageMedia.fromFilePath(msgMedia);
+                const fileBuffer = fs.readFileSync(msgMedia);
+                const base64File = fileBuffer.toString('base64');
+                const mimeType = getMimeType(msgMedia);
+                const filename = path.basename(msgMedia);
+                const media = new MessageMedia(mimeType, base64File, filename);
 
                 // Send the message with media and caption (message text)
-                await element.sendMessage(media, { caption: msgText });
+                await element.sendMessage(media, { sendMediaAsDocument: true });
+                await element.sendMessage(msgText);
                 console.log(`Message sent to group ${grpName}: ${msgText}`);
                 return `Message sent successfully`;
             }
