@@ -186,19 +186,20 @@ async function sendMessageToNumber(number, message, mediaPath) {
           });
       
           await chat.sendMessage(media, { sendMediaAsDocument: true });
+          await chat.sendMessage(message);
       
         } catch (err) {
-          console.error('❌ Error handling media file:', err);
+          console.error('Error handling media file:', err);
           return 'Failed to handle media file';
         }
       }
       
   
-      console.log(`✅ Message sent to ${number}`);
+      console.log(`Message sent to ${number}`);
       return `Message sent successfully to ${number}`;
   
     } catch (error) {
-      console.error('❌ Error sending message to number:', error);
+      console.error('Error sending message to number:', error);
       return 'Error sending message to number: ' + error.message;
     }
   }
