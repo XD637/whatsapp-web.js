@@ -32,7 +32,7 @@ const client = new Client({
     authStrategy: new LocalAuth({
         dataPath: './sessions',
         puppeteer: {
-            headless: true,
+            headless: false,
             executablePath: 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
             args: ['--no-sandbox', '--disable-setuid-sandbox']
           }
