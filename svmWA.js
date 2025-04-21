@@ -30,7 +30,12 @@ const qrcode = require('qrcode');
 
 const client = new Client({
     authStrategy: new LocalAuth({
-        dataPath: './sessions'
+        dataPath: './sessions',
+        puppeteer: {
+            headless: true,
+            executablePath: 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
+            args: ['--no-sandbox', '--disable-setuid-sandbox']
+          }
     })
 });
 
@@ -144,7 +149,7 @@ client.on('message', async (message) => {
 
 async function sendMessageToNumber(number, message, mediaPath) {
     try {
-      const chatId = number.includes('@c.us') ? number : `${number}@c.us`;
+      const chatId = number.includes('@c.us') ? number : `${number}@c.us`; 
   
       if (typeof message !== 'string') {
         console.error("Caption must be a string:", message);
@@ -185,8 +190,7 @@ async function sendMessageToNumber(number, message, mediaPath) {
             sizeKB: (base64File.length / 1024).toFixed(2)
           });
       
-          await chat.sendMessage(media,{ sendMediaAsDocument: true });
-          await chat.sendMessage(message);
+          await chat.sendMessage(media, { caption: message, sendMediaAsDocument: true });
           console.log('Message sent with media:', message);
       
         } catch (err) {
@@ -247,8 +251,8 @@ async function sendApiMessage(grpName, msgText, msgMedia) {
                 const media = new MessageMedia(mimeType, base64File, filename);
 
                 // Send the message with media and caption (message text)
-                await element.sendMessage(media, { sendMediaAsDocument: true });
-                await element.sendMessage(msgText);
+                await element.sendMessage(media, {caption: msgText, sendMediaAsDocument: true });
+
                 console.log(`Message sent to group ${grpName}: ${msgText}`);
                 return `Message sent successfully`;
             }
@@ -284,7 +288,7 @@ app.get("/scan", (req, res) => {
 
 app.get('/test-send', async (req, res) => {
     const testNumber = '919344268155'; // Just the number, without '@c.us'
-    const testMessage = 'Hey there! This is a test message from the bot.';
+    const testMessage = 'Test Video Caption'; // Message caption
     const testMediaPath = path.join(__dirname, 'video', 'secureshutterCompressed.mp4');
 
     try {
