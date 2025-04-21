@@ -30,11 +30,17 @@
   "homepage": "https://wwebjs.dev/",
   "dependencies": {
     "@pedroslopez/moduleraid": "^5.0.2",
+    "express": "^5.1.0",
     "fluent-ffmpeg": "2.1.2",
     "mime": "^3.0.0",
     "node-fetch": "^2.6.9",
     "node-webpmux": "3.1.7",
-    "puppeteer": "^18.2.1"
+    "prompt-sync": "^4.2.0",
+    "puppeteer": "^18.2.1",
+    "qrcode": "^1.5.4",
+    "qrcode-terminal": "^0.12.0",
+    "whatsapp-web.js": "^1.27.0",
+    "ws": "^8.18.1"
   },
   "devDependencies": {
     "@types/node-fetch": "^2.5.12",
