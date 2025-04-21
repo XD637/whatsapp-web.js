@@ -7,6 +7,7 @@ const QRC = require('qrcode');
 const express = require("express");
 const app = express();
 app.set("view engine", "ejs");
+
 const http = require('http');
 const serverHTTP = http.createServer(app);
 const connectedClients = new Set(); 
@@ -14,12 +15,18 @@ const httpport = 4444;
 const tcpport = 5555;
 const wsServerPort = 6666;
 const wsBroadcastserver = 7777;
+
 const wsServer = http.createServer();
+
 const wss = new WebSocket.Server({ server: wsServer });
+
 const wsServer1 = http.createServer();
+
 const wss1 = new WebSocket.Server({ server: wsServer1 });
+
 const { Client, MessageMedia, LocalAuth } = require('whatsapp-web.js');
 const qrcode = require('qrcode');
+
 const client = new Client({
     authStrategy: new LocalAuth({
         dataPath: './sessions'
@@ -70,7 +77,6 @@ client.on('ready', async () => {
             const chatName = chat.name;
             const isGroupChat = isGroup(chat); 
             console.log(chatName + ',' + isGroupChat);
-            
         });
     } catch (error) {
         console.error('Error fetching chat list:', error);
@@ -133,9 +139,6 @@ client.on('message', async (message) => {
 
 async function sendMessageToNumber(number, message, mediaPath) {
     try {
-        // Ensure the number is in the correct format (prepend +91 for India)
-        const formattedNumber = `91${number}@c.us`;
-
         // Check if the media file exists
         if (!fs.existsSync(mediaPath)) {
             console.error('Media file not found:', mediaPath);
@@ -145,28 +148,20 @@ async function sendMessageToNumber(number, message, mediaPath) {
         // Create MessageMedia from the file
         const media = MessageMedia.fromFilePath(mediaPath);
 
-        // Check if the number is valid on WhatsApp
-        const isRegistered = await client.isRegisteredUser(`91${number}@c.us`);
-        if (!isRegistered) {
-            console.error(`Number ${number} is not registered on WhatsApp.`);
-            return `Number ${number} is not registered on WhatsApp.`;
-        }
+        // Send the message along with media and caption (message text)
+        const chat = await client.getChatById(number + '@c.us'); // WhatsApp number format
 
-        // Fetch the chat
-        const chat = await client.getChatById(formattedNumber);
-
-        // Send the message with media and caption
+        // Send the message with media and caption at the same time
         await chat.sendMessage(media, { caption: message });
         console.log(`Message and media sent to ${number}: ${message}`);
-        return `Messagesent`;
+        return `Message sent successfully to ${number}`;
     } catch (error) {
         console.error('Error sending message to number:', error);
         return 'Error sending message to number: ' + error.message;
     }
 }
 
-async function sendApiMessage(grpName, msgText, msgMedia, retryCount = 0) {
-    const maxRetries = 1; // Example limit
+async function sendApiMessage(grpName, msgText, msgMedia) {
     try {
         if (!chatList) {
             console.error('Chat list is not initialized');
@@ -176,41 +171,30 @@ async function sendApiMessage(grpName, msgText, msgMedia, retryCount = 0) {
         for (let i = 0; i < chatList.length; i++) {
             const element = chatList[i];
             if (element.name && element.name.indexOf(grpName) > -1) {
+                // Check if the media file exists
                 if (!fs.existsSync(msgMedia)) {
                     console.error(`Media file does not exist at path: ${msgMedia}`);
                     return 'Media file does not exist';
                 }
-                try{
+
+                // Create MessageMedia from the file
                 const media = MessageMedia.fromFilePath(msgMedia);
-                if (element && typeof element.sendMessage === 'function') {
-                    await element.sendMessage(media, { caption: msgText });
-                } else {
-                    console.error(`Invalid chat object for ${grpName}:`, element);
-                    return `Error sending message to group ${grpName}: ${element}`
-                }
+
+                // Send the message with media and caption (message text)
+                await element.sendMessage(media, { caption: msgText });
                 console.log(`Message sent to group ${grpName}: ${msgText}`);
                 return `Message sent successfully`;
-                }catch(error){
-                    console.error(`Failed to send message to ${grpName}:`, error);
-                    return `Error sending message to group ${grpName}: ${error.message}`;
-                }
             }
         }
-
-        if (retryCount >= maxRetries) {
-            console.error(`Group ${grpName} not found after ${maxRetries} retries.`);
-            return `Group ${grpName} not found`;
-        }
-
         console.log('Group not found, updating chat list and retrying...');
         chatList = await updateChatList();
-        return await sendApiMessage(grpName, msgText, msgMedia, retryCount + 1);
+        await sendApiMessage(grpName, msgText, msgMedia);
+        return `Group ${grpName} not found after updating chat list`;
     } catch (error) {
         console.error(`Error sending message to group ${grpName}:`, error);
         return `Error sending message to group ${grpName}: ${error.message}`;
     }
 }
-
 
 function getChatList() {
     let returnStr = "";
@@ -234,7 +218,7 @@ app.get("/update", async (req, res) => {
     try {
         const updatedChats = await client.getChats();
         chatList = updatedChats;
-        console.log('Updated chat list');
+        console.log('Updated chat list:');
         chatList.forEach(async (chat) => {
             const chatName = chat.name || 'Unnamed Chat';
             const isGroupChat = await isGroup(chat); 
@@ -260,7 +244,7 @@ async function updateChatList() {
         console.log('Updated chat list:');
         chatList.forEach(chat => {
             const isGroupChat = isGroup(chat); 
-            // console.log(chatName + ',' + isGroupChat);
+            console.log(chatName + ',' + isGroupChat);
         });
 
         return chatList; // Return the updated chat list
@@ -290,43 +274,6 @@ app.post('/ai/sendmessage', async (req, res) => {
     }
 });
 
-app.post('/billing/sendpdf', async(req,res) => {
-    try{
-       if(req.body.hasOwnProperty('phoneno')==  false){
-           return res.json({code:false,message:"Phone number missing. Please provide the Phone number",error:null});
-       }
-       if(req.body.hasOwnProperty('feedback')==  false){
-        return res.json({code:false,message:"Feedback missing. Please provide the Feedback",error:null});
-       }
-       if(req.body.hasOwnProperty('pdfpath')==  false){
-        return res.json({code:false,message:"Pdf Path missing. Please provide the Pdf Path",error:null});
-       }
-       let pdfpaths = req.body.pdfpath;
-
-        // Normalize single file input into an array
-        if (typeof pdfpaths === 'string') {
-            pdfpaths = [pdfpaths];
-        }
-       try{
-        var response;
-        for (const pdfpath of pdfpaths) {
-           response = await sendMessageToNumber(req.body.phoneno, req.body.feedback, path.resolve(pdfpath));
-        }
-        if(response == 'Messagesent'){
-         return res.json({code:true,message:"Message sent Successfully",value:'success'});
-        }else{
-            return res.json({code:false,message:"Error sending the message",error:response});
-        }
-       }catch(er){
-         console.log(er);
-          return res.json({code:false,message:'Error sending the message',error:er});
-       }
-    }catch(er){
-     console.log(er);
-     return res.json({code:false,message:'Error sending the message',error:er});
-    }
-}); 
-
 serverHTTP.listen(httpport, () => {
     console.log(`HTTP server listening on port ${httpport}`);
 });
@@ -349,9 +296,9 @@ server.on('connection', function (sock) {
     sockets.push(sock);
 
     sock.on('data', async function (data) {
-        const myArray = data.toString().split("::");
+        const myArray = data.toString().split(":");
         let waCmd = myArray[0];
-        // console.log('Received command from the client=> ' + data.toString());
+        console.log('Received command from the client=> ' + data.toString());
         if (waCmd === "SendMessage") {
             try {
                 let rightStr = myArray[1];
@@ -360,9 +307,9 @@ server.on('connection', function (sock) {
                 let message = myArray1[1];
                 let media = myArray1[2];
 
-                // console.log('Recipient: ' + recipient);
-                // console.log('Message: ' + message);
-                // console.log('Media: ' + media);
+                console.log('Recipient: ' + recipient);
+                console.log('Message: ' + message);
+                console.log('Media: ' + media);
                 var result;
                 if (await isValidPhoneNumber(recipient)) {
                     result = await sendMessageToNumber(recipient, message, media);
@@ -377,7 +324,7 @@ server.on('connection', function (sock) {
             }
         } else if (waCmd === "GetChatList") {
             let chatListStr = getChatList();
-            console.log('Chat List => ' + sock.remoteAddress);
+            console.log('Chat List => ' + sock.remoteAddress + ': ' + chatListStr);
             sockets.forEach(function (sock) {
                 sock.write('<ChatList>' + chatListStr + '</ChatList>');
             });
@@ -404,7 +351,7 @@ wss.on('connection', (ws) => {
         const messageStr = message.toString();
         console.log('Received WebSocket message:', messageStr);
 
-        const data = messageStr.split("::");
+        const data = messageStr.split(":");
         const waCmd = data[0];
 
         if (waCmd === "SendMessage") {
@@ -426,7 +373,7 @@ wss.on('connection', (ws) => {
             })();
         } else if (waCmd === "GetChatList") {
             const chatListStr = getChatList();
-            // console.log('Sending chat list to WebSocket client:', chatListStr);
+            console.log('Sending chat list to WebSocket client:', chatListStr);
             ws.send('<ChatList>' + chatListStr + '</ChatList>');
         }
     });
@@ -473,7 +420,7 @@ wss1.on('connection', (ws) => {
 
     // Optional: Handle incoming WebSocket messages
     ws.on('message', (message) => {
-        // console.log("Message received from WebSocket client:", message);
+        console.log("Message received from WebSocket client:", message);
     });
 });
 

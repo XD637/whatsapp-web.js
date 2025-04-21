@@ -1,35 +1,74 @@
 <!doctype html>
 <html lang="en">
 <head>
-    <title>QR Code Generator</title>
+    <title>SPORADA VMS WhatsApp QR</title>
 
     <!-- Bootstrap CSS -->
-    <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.3.1/css/bootstrap.min.css" integrity="sha384-ggOyR0iXCbMQv3Xipma34MD+dH/1fQ784/j6cY/iJTQUOhcWr7x9JvoRxT2MZw1T" crossorigin="anonymous">
+    <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.3.1/css/bootstrap.min.css">
 
-    <!-- Custom CSS -->
+    <!-- Google Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@500&display=swap" rel="stylesheet">
+
+    <!-- Custom Styles -->
     <style>
-        @import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@500&display=swap');
         * {
-            font-family: Montserrat;
+            font-family: 'Montserrat', sans-serif;
         }
         body {
-            margin: 10px;
-            padding: 10px;
+            background-color: #f7f9fc;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            margin: 0;
+        }
+        .card {
+            background: white;
+            padding: 40px 30px;
+            border-radius: 20px;
+            box-shadow: 0 8px 25px rgba(0, 0, 0, 0.1);
+            max-width: 500px;
+            width: 100%;
+            text-align: center;
+        }
+        h1 {
+            font-size: 24px;
+            margin-bottom: 20px;
+            color: #333;
         }
         .qr-code {
-        max-width: 400px;
-        margin: 10px;
+            max-width: 350px;
+            width: 100%;
+            margin: 20px auto;
         }
+        p {
+            margin: 15px 0;
+            color: #555;
+        }
+        .btn {
+            margin-top: 20px;
+            background-color: #25D366; /* WhatsApp green */
+            color: white;
+            border: none;
+            border-radius: 50px;
+            padding: 10px 25px;
+            font-weight: 600;
+}
+
+        .btn:hover {
+            background-color: #1ebe5d; /* Slightly darker on hover */
+            color: white;
+        }
+
     </style>
 </head>
 
 <body>
-    <div class="container" id="qr-code">
-        <h1 class="text-center">SPORADA VMS WHATSAPP QR CODE</h1>
-        <img src="<%= pQR %>"/>
+    <div class="card">
+        <h1>SPORADA VMS WHATSAPP QR CODE</h1>
+        <img class="qr-code" src="<%= pQR %>" alt="QR Code">
         <p>Scan the QR Code to access data!</p>
-        <a href="/"><button type="button" class="btn btn-primary">Back</button></a>
-        <br>
+        <a href="/"><button type="button" class="btn">Back</button></a>
     </div>
 </body>
 </html>

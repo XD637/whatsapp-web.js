@@ -79,3 +79,7 @@ typings/
 # IDE's
 .idea
 .vscode
+
+#session
+
+sessions/
