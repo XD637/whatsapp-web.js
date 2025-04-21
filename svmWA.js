@@ -11,6 +11,7 @@ app.set("view engine", "ejs");
 const http = require('http');
 const serverHTTP = http.createServer(app);
 const connectedClients = new Set(); 
+const localhost = 'localhost';
 const httpport = 4444;
 const tcpport = 5555;
 const wsServerPort = 6666;
@@ -72,11 +73,13 @@ client.on('ready', async () => {
     console.log('WhatsApp client is ready');
     try {
         chatList = await client.getChats();
+        // console.log(JSON.stringify(chatList, null, 2));
+
         console.log('Initial chat list loaded:');
-        chatList.forEach(async (chat) => {
-            const chatName = chat.name;
-            const isGroupChat = isGroup(chat); 
-            console.log(chatName + ',' + isGroupChat);
+        chatList.forEach(chat => {
+            const chatName = chat.name || 'Unnamed Chat';
+            const isGroupChat = isGroup(chat);
+            console.log(`${chatName}, ${isGroupChat}`);
         });
     } catch (error) {
         console.error('Error fetching chat list:', error);
@@ -137,29 +140,86 @@ client.on('message', async (message) => {
     }
 });
 
+
+
 async function sendMessageToNumber(number, message, mediaPath) {
     try {
-        // Check if the media file exists
-        if (!fs.existsSync(mediaPath)) {
-            console.error('Media file not found:', mediaPath);
-            return 'Media file not found';
+      const chatId = number.includes('@c.us') ? number : `${number}@c.us`;
+  
+      if (typeof message !== 'string') {
+        console.error("Caption must be a string:", message);
+        return 'Caption must be a string';
+      }
+  
+      const chat = await client.getChatById(chatId);
+      if (!chat) {
+        console.error(`Chat not found for: ${chatId}`);
+        return 'Chat not found';
+      }
+  
+      console.log(`Sending to ${chatId}`);
+      console.log('Chat Info:', chat.name, chat.id._serialized);
+      console.log("Client ready?", client.info);
+  
+      if (!client.info || !client.info.me) {
+        console.error('WhatsApp client not ready');
+        return 'WhatsApp client not ready';
+      }
+  
+      if (mediaPath) {
+        try {
+          if (!fs.existsSync(mediaPath)) {
+            console.error('Media file not found or inaccessible:', mediaPath);
+            return 'Media file not found or inaccessible';
+          }
+      
+          const fileBuffer = fs.readFileSync(mediaPath);
+          const base64File = fileBuffer.toString('base64');
+          const mimeType = getMimeType(mediaPath);
+          const filename = path.basename(mediaPath);
+          const media = new MessageMedia(mimeType, base64File, filename);
+      
+          console.log("📎 Media constructed:", {
+            filename,
+            mimeType,
+            sizeKB: (base64File.length / 1024).toFixed(2)
+          });
+      
+          await chat.sendMessage(media, { sendMediaAsDocument: true });
+      
+        } catch (err) {
+          console.error('❌ Error handling media file:', err);
+          return 'Failed to handle media file';
         }
-
-        // Create MessageMedia from the file
-        const media = MessageMedia.fromFilePath(mediaPath);
-
-        // Send the message along with media and caption (message text)
-        const chat = await client.getChatById(number + '@c.us'); // WhatsApp number format
-
-        // Send the message with media and caption at the same time
-        await chat.sendMessage(media, { caption: message });
-        console.log(`Message and media sent to ${number}: ${message}`);
-        return `Message sent successfully to ${number}`;
+      }
+      
+  
+      console.log(`✅ Message sent to ${number}`);
+      return `Message sent successfully to ${number}`;
+  
     } catch (error) {
-        console.error('Error sending message to number:', error);
-        return 'Error sending message to number: ' + error.message;
+      console.error('❌ Error sending message to number:', error);
+      return 'Error sending message to number: ' + error.message;
+    }
+  }
+
+// Simple mime resolver
+function getMimeType(filePath) {
+    const ext = filePath.split('.').pop().toLowerCase();
+    switch (ext) {
+        case 'jpg':
+        case 'jpeg': return 'image/jpeg';
+        case 'png': return 'image/png';
+        case 'pdf': return 'application/pdf';
+        case 'mp4': return 'video/mp4';
+        case 'mp3': return 'audio/mpeg';
+        case 'webp': return 'image/webp';
+        default: return 'application/octet-stream'; // fallback
     }
 }
+
+
+
 
 async function sendApiMessage(grpName, msgText, msgMedia) {
     try {
@@ -210,9 +270,25 @@ app.get('/', (req, res) => {
     res.render("index");
 });
 
+
 app.get("/scan", (req, res) => {
     res.render("scan", { pQR });
 });
+
+app.get('/test-send', async (req, res) => {
+    const testNumber = '919344268155'; // Just the number, without '@c.us'
+    const testMessage = 'Hey there! This is a test message from the bot.';
+    const testMediaPath = path.join(__dirname, 'video', 'secureshutterCompressed.mp4');
+
+    try {
+        const result = await sendMessageToNumber(testNumber, testMessage, testMediaPath);
+        res.send(result);
+    } catch (err) {
+        console.error(err);
+        res.status(500).send('Error sending message');
+    }
+});
+
 
 app.get("/update", async (req, res) => {
     try {
@@ -275,7 +351,7 @@ app.post('/ai/sendmessage', async (req, res) => {
 });
 
 serverHTTP.listen(httpport, () => {
-    console.log(`HTTP server listening on port ${httpport}`);
+    console.log(`HTTP server listening on http://${localhost}:${httpport}`);
 });
 
 wsServer.listen(wsServerPort, () => {
