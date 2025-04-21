@@ -1,15 +1,31 @@
 const net = require('net');
 const port = 8081;
-const host = '192.168.0.155';
+const host = '192.168.0.169';
 
 const fs = require('fs');
 const QRC = require('qrcode'); // For generating QR images
+const express = require('express');
+const app = express();
+const path = require('path');  // For serving static files
 
 const { Client, MessageMedia } = require('whatsapp-web.js');
 const qrcode = require('qrcode-terminal');
 
 var pQR;
 var chatList; // For storing the list of chats
+
+// Serve the 'qrcode.png' file as a static file using Express
+app.use(express.static(path.join(__dirname, 'public')));
+
+// Serve the root page
+app.get('/', (req, res) => {
+    res.send('<h1>Welcome! <a href="/qrcode">Click here to see the QR code</a></h1>');
+});
+
+// Set up a route to show the QR code in the browser
+app.get('/qrcode', (req, res) => {
+    res.sendFile(path.join(__dirname, 'qrcode.png'));
+});
 
 // Init WhatsApp client
 const client = new Client();
@@ -128,4 +144,9 @@ server.on('connection', function (sock) {
     sock.on('error', function (err) {
         console.log('Socket ERROR:', err.message);
     });
+});
+
+// Start Express server to serve the QR code and other assets
+app.listen(3000, () => {
+    console.log('Express server is running on http://localhost:3000');
 });
