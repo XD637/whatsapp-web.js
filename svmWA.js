@@ -29,14 +29,22 @@ const { Client, MessageMedia, LocalAuth } = require('whatsapp-web.js');
 const qrcode = require('qrcode');
 
 const client = new Client({
-    authStrategy: new LocalAuth({
-        dataPath: './sessions',
-        puppeteer: {
-            headless: false,
-            executablePath: 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
-            args: ['--no-sandbox', '--disable-setuid-sandbox']
-          }
-    })
+    authStrategy: new LocalAuth(),
+    puppeteer: { 
+        headless: false,
+        executablePath: 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
+        ignoreHTTPSErrors: true,
+        args: [
+            "--no-sandbox",
+            "--disable-setuid-sandbox",
+            "--disable-extensions",
+            '--disable-gpu', 
+            "--disable-accelerated-2d-canvas",
+            "--no-first-run",
+            "--no-zygote",
+            '--disable-dev-shm-usage'
+        ],
+    }
 });
 
 let chatList = [];
@@ -155,6 +163,7 @@ client.on('message', async (message) => {
     }
 });
 
+const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 
 
 async function sendMessageToNumber(number, message, mediaPath) {
@@ -186,7 +195,12 @@ async function sendMessageToNumber(number, message, mediaPath) {
         console.log('Video preloaded successfully');
         if (videoMedia) {
           console.log('Sending message with media:', message);
-          await chat.sendMessage(videoMedia, {caption:message, sendMediaAsDocument: true });;
+          const messages = await chat.fetchMessages({ limit: 1 });
+          if (messages.length > 0) {
+            const lastMsg = messages[0];
+                await lastMsg.reply(videoMedia); // safe way to attach media as a reply
+            }
+
           console.log('Message sent with media:', message);
         } else {
             console.error(`Video file not found at path: ${videoPath}`);
