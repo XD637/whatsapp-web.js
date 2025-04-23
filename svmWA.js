@@ -195,11 +195,7 @@ async function sendMessageToNumber(number, message, mediaPath) {
         console.log('Video preloaded successfully');
         if (videoMedia) {
           console.log('Sending message with media:', message);
-          const messages = await chat.fetchMessages({ limit: 1 });
-          if (messages.length > 0) {
-            const lastMsg = messages[0];
-                await lastMsg.reply(videoMedia); // safe way to attach media as a reply
-            }
+          await chat.sendMessage(videoMedia, { caption: message, sendMediaAsDocument: false });
 
           console.log('Message sent with media:', message);
         } else {
