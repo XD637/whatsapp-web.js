@@ -97,19 +97,28 @@ client.on('message', async (message) => {
         const keyword = "Secure"; // Define the keyword
         
         // Check if the incoming message matches the keyword
-        if (message.body.toLowerCase().trim() === keyword.toLowerCase()) {
-            console.log(`Keyword "${keyword}" received from ${message.from}`);
-
-            // Send the preloaded video immediately
-            if (cachedMedia) {
-                await message.reply('Thanks for Your Enquiry. Kindly find Secure-Shutter Explainer Video:');
-                await client.sendMessage(message.from, cachedMedia);
-                console.log('Video sent successfully');
-            } else {
-                console.error('Video is not preloaded yet.');
-                await message.reply('Sorry, the video is currently unavailable.');
+        client.on('message', async (message) => {
+            try {
+              if (message.fromMe) return; // ignore your own sent messages
+          
+              const keyword = "Secure";
+              if (message.body.toLowerCase().trim() === keyword.toLowerCase()) {
+                console.log(`Keyword "${keyword}" received from ${message.from}`);
+          
+                if (cachedMedia) {
+                  await message.reply('Thanks for Your Enquiry. Kindly find Secure-Shutter Explainer Video:');
+                  await client.sendMessage(message.from, cachedMedia);
+                  console.log('Video sent successfully');
+                } else {
+                  console.error('Video is not preloaded yet.');
+                  await message.reply('Sorry, the video is currently unavailable.');
+                }
+              }
+            } catch (err) {
+              console.error('Error in message handler:', err);
             }
-        }
+          });
+          
         let senderName = ''; // Placeholder for name
         const date = new Date(message.timestamp * 1000); // Convert from seconds to milliseconds
 
@@ -173,22 +182,18 @@ async function sendMessageToNumber(number, message, mediaPath) {
   
       if (mediaPath) {
         try {
-          if (!fs.existsSync(mediaPath)) {
-            console.error('Media file not found or inaccessible:', mediaPath);
-            return 'Media file not found or inaccessible';
-          }
-      
-          const fileBuffer = fs.readFileSync(mediaPath);
-          const base64File = fileBuffer.toString('base64');
-          const mimeType = getMimeType(mediaPath);
-          const filename = path.basename(mediaPath);
-          const media = new MessageMedia(mimeType, base64File, filename);
-      
-          console.log("Media constructed:", {
-            filename,
-            mimeType,
-            sizeKB: (base64File.length / 1024).toFixed(2)
-          });
+            if (!fs.existsSync(mediaPath)) {
+                console.error('Media file not found or inaccessible:', mediaPath);
+                return 'Media file not found or inaccessible';
+            }
+    
+            const media = MessageMedia.fromFilePath(mediaPath);
+    
+            console.log("Media constructed:", {
+                filename: media.filename,
+                mimeType: media.mimetype,
+                sizeKB: (media.data.length / 1024).toFixed(2)
+            });
       
           await chat.sendMessage(media, { caption: message, sendMediaAsDocument: true });
           console.log('Message sent with media:', message);
@@ -251,7 +256,7 @@ async function sendApiMessage(grpName, msgText, msgMedia) {
                 const media = new MessageMedia(mimeType, base64File, filename);
 
                 // Send the message with media and caption (message text)
-                await element.sendMessage(media, {caption: msgText, sendMediaAsDocument: true });
+                await element.sendMessage(media, {caption: msgText, sendMediaAsDocument: false });
 
                 console.log(`Message sent to group ${grpName}: ${msgText}`);
                 return `Message sent successfully`;
@@ -300,6 +305,21 @@ app.get('/test-send', async (req, res) => {
     }
 });
 
+app.get('/test-group-send', async (req, res) => {
+    const testGroupName = 'SVMWA TEST'; // Replace with a partial or full match of your group name
+    const testCaption = 'Test Caption';
+    const testMediaPath = path.join(__dirname, 'image', 'aiimage.jpg'); // Path to the media file
+
+    try {
+        const result = await sendApiMessage(testGroupName, testCaption, testMediaPath);
+        res.send(result);
+    } catch (err) {
+        console.error(err);
+        res.status(500).send('Error sending group message');
+    }
+});
+
+
 
 app.get("/update", async (req, res) => {
     try {
@@ -308,7 +328,7 @@ app.get("/update", async (req, res) => {
         console.log('Updated chat list:');
         chatList.forEach(async (chat) => {
             const chatName = chat.name || 'Unnamed Chat';
-            const isGroupChat = await isGroup(chat); 
+            const isGroupChat = isGroup(chat); 
             console.log(chatName + ',' + isGroupChat);
         });
         res.send('Chat list updated successfully');
