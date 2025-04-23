@@ -43,9 +43,10 @@ let chatList = [];
 let pQR;
 let cachedMedia;  // Cached video media for instant response
 const videoPath = path.join(__dirname, 'video', 'secureshutter.mp4'); // Path to the video file
+let videoMedia; // Variable to hold the video media object
 
 // Preload the video when the server starts
-function preloadVideo() {
+function preloadVideo(video) {
     if (fs.existsSync(videoPath)) {
         cachedMedia = MessageMedia.fromFilePath(videoPath);
         console.log('Video preloaded successfully');
@@ -180,31 +181,17 @@ async function sendMessageToNumber(number, message, mediaPath) {
         return 'WhatsApp client not ready';
       }
   
-      if (mediaPath) {
-        try {
-            if (!fs.existsSync(mediaPath)) {
-                console.error('Media file not found or inaccessible:', mediaPath);
-                return 'Media file not found or inaccessible';
-            }
-    
-            const media = MessageMedia.fromFilePath(mediaPath);
-    
-            console.log("Media constructed:", {
-                filename: media.filename,
-                mimeType: media.mimetype,
-                sizeKB: (media.data.length / 1024).toFixed(2)
-            });
-      
-          await chat.sendMessage(media, { caption: message, sendMediaAsDocument: true });
+      if (fs.existsSync(mediaPath)) {
+        videoMedia = MessageMedia.fromFilePath(mediaPath);
+        console.log('Video preloaded successfully');
+        if (videoMedia) {
+          console.log('Sending message with media:', message);
+          await chat.sendMessage(videoMedia, {caption:message, sendMediaAsDocument: true });;
           console.log('Message sent with media:', message);
-      
-        } catch (err) {
-          console.error('Error handling media file:', err);
-          return 'Failed to handle media file';
+        } else {
+            console.error(`Video file not found at path: ${videoPath}`);
         }
-      }
-      
-  
+        }      
       console.log(`Message sent to ${number}`);
       return `Message sent successfully to ${number}`;
   
@@ -294,10 +281,9 @@ app.get("/scan", (req, res) => {
 app.get('/test-send', async (req, res) => {
     const testNumber = '919344268155'; // Just the number, without '@c.us'
     const testMessage = 'Test Video Caption'; // Message caption
-    const testMediaPath = path.join(__dirname, 'video', 'secureshutterCompressed.mp4');
 
     try {
-        const result = await sendMessageToNumber(testNumber, testMessage, testMediaPath);
+        const result = await sendMessageToNumber(testNumber, testMessage, videoPath);
         res.send(result);
     } catch (err) {
         console.error(err);
