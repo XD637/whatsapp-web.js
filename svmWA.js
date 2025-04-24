@@ -3,10 +3,19 @@ const WebSocket = require('ws');
 const host = '0.0.0.0';
 const path = require('path');
 const fs = require('fs');
+dotenv = require('dotenv').config();
+const rateLimit = require('express-rate-limit');
+const cors = require('cors');
+const morgan = require('morgan');
+
 const QRC = require('qrcode');
 const express = require("express");
 const app = express();
 app.set("view engine", "ejs");
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
+app.use(cors());
+app.use(morgan('dev'));
 
 const http = require('http');
 const serverHTTP = http.createServer(app);
@@ -54,7 +63,7 @@ const videoPath = path.join(__dirname, 'video', 'secureshutter.mp4'); // Path to
 let videoMedia; // Variable to hold the video media object
 
 // Preload the video when the server starts
-function preloadVideo(video) {
+function preloadVideo() {
     if (fs.existsSync(videoPath)) {
         cachedMedia = MessageMedia.fromFilePath(videoPath);
         console.log('Video preloaded successfully');
@@ -162,8 +171,6 @@ client.on('message', async (message) => {
         console.error('Error handling message:', error);
     }
 });
-
-const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 
 
 async function sendMessageToNumber(number, message, mediaPath) {
@@ -279,21 +286,57 @@ function getChatList() {
     return returnStr;
 }
 
-app.get('/', (req, res) => {
+// Example: 100 requests per 15 minutes per IP
+const apiLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000, // 15 minutes
+    max: 100, // limit each IP to 100 requests per windowMs
+    message: { error: 'Too many requests, slow down' },
+    standardHeaders: true, // Return rate limit info in the `RateLimit-*` headers
+    legacyHeaders: false, // Disable the `X-RateLimit-*` headers
+  });
+
+function verifyApiKey(req, res, next) {
+    const apiKey = req.headers['x-api-key'];
+    const authHeader = req.headers['authorization'];
+    const bearerToken = authHeader && authHeader.startsWith('Bearer ')
+      ? authHeader.split(' ')[1]
+      : null;
+  
+    const validKey = process.env.API_SECRET_KEY;
+  
+    if (!apiKey && !bearerToken) {
+      return res.status(401).json({ error: 'No API key or Bearer token provided' });
+    }
+  
+    if (apiKey && apiKey === validKey) {
+      return next(); // API key is valid
+    }
+  
+    if (bearerToken && bearerToken === validKey) {
+      return next(); // Bearer token is valid
+    }
+  
+    return res.status(403).json({ error: 'Invalid API key or Bearer token' });
+  }
+  
+  
+
+app.get('/', apiLimiter, verifyApiKey, (req, res) => {
     res.render("index");
 });
 
 
-app.get("/scan", (req, res) => {
+app.get("/scan", apiLimiter,  verifyApiKey, (req, res) => {
     res.render("scan", { pQR });
 });
 
-app.get('/test-send', async (req, res) => {
+app.get('/test-send', apiLimiter, verifyApiKey, async (req, res) => {
     const testNumber = '919344268155'; // Just the number, without '@c.us'
     const testMessage = 'Test Video Caption'; // Message caption
+    testMediaPath = path.join(__dirname, 'video', 'secureshutter.mp4'); // Path to the media file
 
     try {
-        const result = await sendMessageToNumber(testNumber, testMessage, videoPath);
+        const result = await sendMessageToNumber(testNumber, testMessage, testMediaPath);
         res.send(result);
     } catch (err) {
         console.error(err);
@@ -301,7 +344,7 @@ app.get('/test-send', async (req, res) => {
     }
 });
 
-app.get('/test-group-send', async (req, res) => {
+app.get('/test-group-send', apiLimiter, verifyApiKey, async (req, res) => {
     const testGroupName = 'SVMWA TEST'; // Replace with a partial or full match of your group name
     const testCaption = 'Test Caption';
     const testMediaPath = path.join(__dirname, 'image', 'aiimage.jpg'); // Path to the media file
@@ -317,7 +360,7 @@ app.get('/test-group-send', async (req, res) => {
 
 
 
-app.get("/update", async (req, res) => {
+app.get("/update", apiLimiter, verifyApiKey,  async (req, res) => {
     try {
         const updatedChats = await client.getChats();
         chatList = updatedChats;
@@ -356,9 +399,7 @@ async function updateChatList() {
         throw new Error('Failed to update chat list');
     }
 }
-
-app.use(express.json());
-app.post('/ai/sendmessage', async (req, res) => {
+app.post('/ai/sendmessage', apiLimiter, verifyApiKey, async (req, res) => {
     try {
         if (!req.body.hasOwnProperty('aiinference')) {
             return res.json({ code: false, message: "AI inference id missing.", error: null });
