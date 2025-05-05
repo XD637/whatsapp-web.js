@@ -3,7 +3,7 @@ const WebSocket = require('ws');
 const host = '0.0.0.0';
 const path = require('path');
 const fs = require('fs');
-dotenv = require('dotenv').config();
+require('dotenv').config();
 const rateLimit = require('express-rate-limit');
 const cors = require('cors');
 const morgan = require('morgan');
@@ -20,7 +20,7 @@ app.use(morgan('dev'));
 const http = require('http');
 const serverHTTP = http.createServer(app);
 const connectedClients = new Set(); 
-const localhost = 'localhost';
+const localhost = '192.168.0.169';
 const httpport = 4444;
 const tcpport = 5555;
 const wsServerPort = 6666;
@@ -112,30 +112,21 @@ client.on('ready', async () => {
 // Respond to the "Secure" keyword with a video
 client.on('message', async (message) => {
     try {
-        const keyword = "Secure"; // Define the keyword
-        
-        // Check if the incoming message matches the keyword
-        client.on('message', async (message) => {
-            try {
-              if (message.fromMe) return; // ignore your own sent messages
-          
-              const keyword = "Secure";
-              if (message.body.toLowerCase().trim() === keyword.toLowerCase()) {
-                console.log(`Keyword "${keyword}" received from ${message.from}`);
-          
-                if (cachedMedia) {
-                  await message.reply('Thanks for Your Enquiry. Kindly find Secure-Shutter Explainer Video:');
-                  await client.sendMessage(message.from, cachedMedia);
-                  console.log('Video sent successfully');
-                } else {
-                  console.error('Video is not preloaded yet.');
-                  await message.reply('Sorry, the video is currently unavailable.');
-                }
-              }
-            } catch (err) {
-              console.error('Error in message handler:', err);
+        if (message.fromMe) return; // ignore self messages
+
+        const keyword = "Secure";
+        if (message.body.toLowerCase().trim() === keyword.toLowerCase()) {
+            console.log(`Keyword "${keyword}" received from ${message.from}`);
+            if (cachedMedia) {
+                await message.reply('Thanks for Your Enquiry. Kindly find Secure-Shutter Explainer Video:');
+                await client.sendMessage(message.from, cachedMedia);
+                console.log('Video sent successfully');
+            } else {
+                console.error('Video is not preloaded yet.');
+                await message.reply('Sorry, the video is currently unavailable.');
             }
-          });
+        };
+
           
         let senderName = ''; // Placeholder for name
         const date = new Date(message.timestamp * 1000); // Convert from seconds to milliseconds
@@ -172,15 +163,30 @@ client.on('message', async (message) => {
     }
 });
 
+client.on('message', async (message) => {
+    try {
+        if (message.hasQuotedMsg) {
+            const quotedMsg = await message.getQuotedMessage();
+            const sender = quotedMsg.from; // The original sender of the quoted message
+            const reply = message.body;
+
+            // Forward the reply to the original sender
+            await client.sendMessage(sender, `Reply to your message: ${reply}`);
+            console.log('Reply forwarded to the original sender');
+        }
+    } catch (error) {
+        console.error('Error handling reply:', error);
+    }
+});
 
 async function sendMessageToNumber(number, message, mediaPath) {
     try {
       const chatId = number.includes('@c.us') ? number : `${number}@c.us`; 
   
-      if (typeof message !== 'string') {
-        console.error("Caption must be a string:", message);
-        return 'Caption must be a string';
-      }
+    //   if (typeof message !== 'string') {
+    //     console.error("Caption must be a string:", message);
+    //     return 'Caption must be a string';
+    //   }
   
       const chat = await client.getChatById(chatId);
       if (!chat) {
@@ -235,8 +241,7 @@ function getMimeType(filePath) {
 
 
 
-
-async function sendApiMessage(grpName, msgText, msgMedia) {
+async function sendApiMessage(grpName, msgText, msgMedia, attempt = 1) {
     try {
         if (!chatList) {
             console.error('Chat list is not initialized');
@@ -245,36 +250,56 @@ async function sendApiMessage(grpName, msgText, msgMedia) {
 
         for (let i = 0; i < chatList.length; i++) {
             const element = chatList[i];
-            if (element.name && element.name.indexOf(grpName) > -1) {
-                // Check if the media file exists
+
+            if (element.isGroup && element.name && element.name.includes(grpName)) {
+                const chat = await client.getChatById(element.id._serialized);
+
+                if (!chat || typeof chat.sendMessage !== 'function') {
+                    console.warn(`Invalid chat object for group ${grpName}`);
+                    continue;
+                }
+
                 if (!fs.existsSync(msgMedia)) {
                     console.error(`Media file does not exist at path: ${msgMedia}`);
                     return 'Media file does not exist';
                 }
 
-                // Create MessageMedia from the file
-                const fileBuffer = fs.readFileSync(msgMedia);
-                const base64File = fileBuffer.toString('base64');
-                const mimeType = getMimeType(msgMedia);
-                const filename = path.basename(msgMedia);
-                const media = new MessageMedia(mimeType, base64File, filename);
+                try {
+                    const fileBuffer = fs.readFileSync(msgMedia);
+                    const base64File = fileBuffer.toString('base64');
+                    const mimeType = getMimeType(msgMedia);
+                    const filename = path.basename(msgMedia);
+                    const media = new MessageMedia(mimeType, base64File, filename);
 
-                // Send the message with media and caption (message text)
-                await element.sendMessage(media, {caption: msgText, sendMediaAsDocument: false });
+                    await chat.sendMessage(media, {
+                        caption: msgText,
+                        sendMediaAsDocument: false
+                    });
 
-                console.log(`Message sent to group ${grpName}: ${msgText}`);
-                return `Message sent successfully`;
+                    console.log(`Message sent to group "${grpName}": ${msgText}`);
+                    return 'Message sent successfully';
+                } catch (sendErr) {
+                    console.error(`Failed to send message to "${grpName}":`, sendErr);
+                    return `Error sending message: ${sendErr.message}`;
+                }
             }
         }
-        console.log('Group not found, updating chat list and retrying...');
-        chatList = await updateChatList();
-        await sendApiMessage(grpName, msgText, msgMedia);
-        return `Group ${grpName} not found after updating chat list`;
+
+        // If we reached here, group wasn't found
+        if (attempt < 2) {
+            console.log('Group not found. Updating chat list and retrying...');
+            chatList = await updateChatList();
+            return await sendApiMessage(grpName, msgText, msgMedia, attempt + 1);
+        } else {
+            return `Group "${grpName}" not found after retry`;
+        }
+
     } catch (error) {
-        console.error(`Error sending message to group ${grpName}:`, error);
-        return `Error sending message to group ${grpName}: ${error.message}`;
+        console.error(`Fatal error in sendApiMessage:`, error);
+        return `Error: ${error.message}`;
     }
 }
+
 
 function getChatList() {
     let returnStr = "";
@@ -295,42 +320,42 @@ const apiLimiter = rateLimit({
     legacyHeaders: false, // Disable the `X-RateLimit-*` headers
   });
 
-function verifyApiKey(req, res, next) {
-    const apiKey = req.headers['x-api-key'];
-    const authHeader = req.headers['authorization'];
-    const bearerToken = authHeader && authHeader.startsWith('Bearer ')
-      ? authHeader.split(' ')[1]
-      : null;
+// function verifyApiKey(req, res, next) {
+//     const apiKey = req.headers['x-api-key'];
+//     const authHeader = req.headers['authorization'];
+//     const bearerToken = authHeader && authHeader.startsWith('Bearer ')
+//       ? authHeader.split(' ')[1]
+//       : null;
   
-    const validKey = process.env.API_SECRET_KEY;
+//     const validKey = process.env.API_SECRET_KEY;
   
-    if (!apiKey && !bearerToken) {
-      return res.status(401).json({ error: 'No API key or Bearer token provided' });
-    }
+//     if (!apiKey && !bearerToken) {
+//       return res.status(401).json({ error: 'No API key or Bearer token provided' });
+//     }
   
-    if (apiKey && apiKey === validKey) {
-      return next(); // API key is valid
-    }
+//     if (apiKey && apiKey === validKey) {
+//       return next(); // API key is valid
+//     }
   
-    if (bearerToken && bearerToken === validKey) {
-      return next(); // Bearer token is valid
-    }
+//     if (bearerToken && bearerToken === validKey) {
+//       return next(); // Bearer token is valid
+//     }
   
-    return res.status(403).json({ error: 'Invalid API key or Bearer token' });
-  }
+//     return res.status(403).json({ error: 'Invalid API key or Bearer token' });
+//   }
   
   
 
-app.get('/', apiLimiter, verifyApiKey, (req, res) => {
+app.get('/', apiLimiter, (req, res) => {
     res.render("index");
 });
 
 
-app.get("/scan", apiLimiter,  verifyApiKey, (req, res) => {
+app.get("/scan", apiLimiter, (req, res) => {
     res.render("scan", { pQR });
 });
 
-app.get('/test-send', apiLimiter, verifyApiKey, async (req, res) => {
+app.get('/test-send', apiLimiter, async (req, res) => {
     const testNumber = '919344268155'; // Just the number, without '@c.us'
     const testMessage = 'Test Video Caption'; // Message caption
     testMediaPath = path.join(__dirname, 'video', 'secureshutter.mp4'); // Path to the media file
@@ -344,7 +369,19 @@ app.get('/test-send', apiLimiter, verifyApiKey, async (req, res) => {
     }
 });
 
-app.get('/test-group-send', apiLimiter, verifyApiKey, async (req, res) => {
+app.post('/api/send-message', async (req, res) => {
+    const { groupName, messageText, mediaPath } = req.body;
+
+    if (!groupName || !messageText) {
+        return res.status(400).json({ error: 'groupName and messageText are required' });
+    }
+
+    const result = await sendApiMessage(groupName, messageText, mediaPath);
+    res.json({ result });
+});
+
+
+app.get('/test-group-send', apiLimiter, async (req, res) => {
     const testGroupName = 'SVMWA TEST'; // Replace with a partial or full match of your group name
     const testCaption = 'Test Caption';
     const testMediaPath = path.join(__dirname, 'image', 'aiimage.jpg'); // Path to the media file
@@ -360,7 +397,7 @@ app.get('/test-group-send', apiLimiter, verifyApiKey, async (req, res) => {
 
 
 
-app.get("/update", apiLimiter, verifyApiKey,  async (req, res) => {
+app.get("/update", apiLimiter,  async (req, res) => {
     try {
         const updatedChats = await client.getChats();
         chatList = updatedChats;
@@ -399,7 +436,7 @@ async function updateChatList() {
         throw new Error('Failed to update chat list');
     }
 }
-app.post('/ai/sendmessage', apiLimiter, verifyApiKey, async (req, res) => {
+app.post('/ai/sendmessage', apiLimiter, async (req, res) => {
     try {
         if (!req.body.hasOwnProperty('aiinference')) {
             return res.json({ code: false, message: "AI inference id missing.", error: null });
@@ -415,6 +452,104 @@ app.post('/ai/sendmessage', apiLimiter, verifyApiKey, async (req, res) => {
     } catch (er) {
         console.log(er);
         return res.json({ code: false, message: 'Error sending the message', error: er });
+    }
+});
+
+// Create a new group
+app.post('/api/create-group', async (req, res) => {
+    const { groupName, participants } = req.body;
+
+    if (!groupName || !participants || !Array.isArray(participants)) {
+        return res.status(400).json({ error: 'groupName and participants (array) are required' });
+    }
+
+    try {
+        const group = await createGroup(groupName, participants);
+        if (!group) {
+            throw new Error('Group creation failed');
+        }
+        res.json({ success: true, group });
+    } catch (error) {
+        console.error('Error creating group:', error);
+        res.status(500).json({ success: false, error: error.message || 'Failed to create group' });
+    }
+});
+
+// Add members to an existing group
+app.post('/api/add-members', async (req, res) => {
+    const { groupId, members } = req.body;
+
+    if (!groupId || !members || !Array.isArray(members)) {
+        return res.status(400).json({ error: 'groupId and members (array) are required' });
+    }
+
+    try {
+        await addMembersToGroup(groupId, members);
+        res.json({ success: true, message: 'Members processed successfully' });
+    } catch (error) {
+        console.error('Error adding members:', error);
+        res.status(500).json({ error: 'Failed to process members' });
+    }
+});
+
+// Promote or demote group members to/from admin
+app.post('/api/manage-admins', async (req, res) => {
+    const { groupId, members, action } = req.body;
+
+    if (!groupId || !members || !Array.isArray(members) || !['promote', 'demote'].includes(action)) {
+        return res.status(400).json({ error: 'groupId, members (array), and action (promote/demote) are required' });
+    }
+
+    try {
+        if (action === 'promote') {
+            await promoteToAdmin(groupId, members);
+            res.json({ success: true, message: 'Members promoted to admin successfully' });
+        } else if (action === 'demote') {
+            await demoteFromAdmin(groupId, members);
+            res.json({ success: true, message: 'Members demoted from admin successfully' });
+        }
+    } catch (error) {
+        console.error('Error managing admins:', error);
+        res.status(500).json({ error: 'Failed to manage admins' });
+    }
+});
+
+// Send a message with media and tag members
+app.post('/api/send-media-message', async (req, res) => {
+    const { groupId, message, mediaPath, taggedMembers } = req.body;
+
+    if (!groupId || !message || !mediaPath || !Array.isArray(taggedMembers)) {
+        return res.status(400).json({ error: 'groupId, message, mediaPath, and taggedMembers (array) are required' });
+    }
+
+    try {
+        await sendMessageWithMedia(groupId, message, mediaPath, taggedMembers);
+        res.json({ success: true, message: 'Message sent successfully' });
+    } catch (error) {
+        console.error('Error sending message with media:', error);
+        res.status(500).json({ error: 'Failed to send message with media' });
+    }
+});
+
+// Reply to a specific message or tag a user
+app.post('/api/reply-message', async (req, res) => {
+    const { messageId, replyText } = req.body;
+
+    if (!messageId || !replyText) {
+        return res.status(400).json({ error: 'messageId and replyText are required' });
+    }
+
+    try {
+        const message = await client.getMessageById(messageId);
+        if (!message) {
+            return res.status(404).json({ error: 'Message not found' });
+        }
+
+        await message.reply(replyText);
+        res.json({ success: true, message: 'Reply sent successfully' });
+    } catch (error) {
+        console.error('Error replying to message:', error);
+        res.status(500).json({ error: 'Failed to send reply' });
     }
 });
 
@@ -477,7 +612,7 @@ server.on('connection', function (sock) {
 
     sock.on('close', function (data) {
         let index = sockets.findIndex(function (o) {
-            return o.remoteAddress === sock.remoteAddress && o.remotePort === sock.remotePort;
+            return o.remoteAddress === sock.remoteAddress && o.remotePort === o.remotePort;
         });
         if (index !== -1) sockets.splice(index, 1);
         console.log('CLOSED: ' + sock.remoteAddress + ' ' + sock.remotePort);
@@ -571,3 +706,94 @@ wss1.on('connection', (ws) => {
 wsServer1.listen(wsBroadcastserver, () => {
     console.log(`Broadcast server is running on port ${wsBroadcastserver}`);
 });
+
+async function createGroup(groupName, participants) { 
+     /*{
+    "groupName": "Test Group",
+    "participants": ["919344268155@c.us"]
+  }*/
+    try {
+        // Ensure all participants are strings ending with @c.us
+        const participantIds = participants.map(phoneNumber => 
+            phoneNumber.endsWith('@c.us') ? phoneNumber : `${phoneNumber}@c.us`
+        );
+        // Create the group
+        const group = await client.createGroup(groupName, participantIds);
+        console.log(`Group created: ${group.name}`);
+        return group;
+    } catch (error) {
+        console.error('Error creating group:', error);
+        throw error;
+    }
+}
+
+async function addMembersToGroup(groupId, members) {
+    try {
+        const group = await client.getChatById(groupId);
+        const restrictedNumbers = [];
+
+        for (const member of members) {
+            try {
+                await group.addParticipants([member]); // Attempt to add the member
+                console.log(`Member added successfully: ${member}`);
+            } catch (error) {
+                console.warn(`Could not add member ${member}:`, error.message);
+                restrictedNumbers.push(member); // Add to restricted list
+            }
+        }
+
+        if (restrictedNumbers.length > 0) {
+            console.log('Generating group invite link for restricted numbers...');
+            const inviteCode = await group.getInviteCode();
+            const inviteLink = `https://chat.whatsapp.com/${inviteCode}`;
+
+            for (const restrictedNumber of restrictedNumbers) {
+                try {
+                    await client.sendMessage(
+                        restrictedNumber,
+                        `Hi! You couldn't be added to the group "${group.name}" due to your privacy settings. Please join using this invite link: ${inviteLink}`
+                    );
+                    console.log(`Invite link sent to ${restrictedNumber}`);
+                } catch (error) {
+                    console.error(`Failed to send invite link to ${restrictedNumber}:`, error.message);
+                }
+            }
+        }
+
+        console.log('All members processed successfully');
+    } catch (error) {
+        console.error('Error adding members to group:', error);
+        throw error;
+    }
+}
+
+async function promoteToAdmin(groupId, members) {
+    try {
+        const group = await client.getChatById(groupId);
+        await group.promoteParticipants(members); // members is an array of phone numbers
+        console.log('Members promoted to admin successfully');
+    } catch (error) {
+        console.error('Error promoting members:', error);
+        throw error;
+    }
+}
+
+async function sendMessageWithMedia(groupId, message, mediaPath, taggedMembers) {
+    try {
+        const group = await client.getChatById(groupId);
+
+        // Create media object
+        const media = MessageMedia.fromFilePath(mediaPath);
+
+        // Format message with mentions
+        const mentions = taggedMembers.map(member => client.getContactById(member));
+        const formattedMessage = `${message}\n\n${taggedMembers.map(member => `@${member.split('@')[0]}`).join(' ')}`;
+
+        // Send message with media and mentions
+        await group.sendMessage(media, { caption: formattedMessage, mentions });
+        console.log('Message sent successfully');
+    } catch (error) {
+        console.error('Error sending message with media:', error);
+        throw error;
+    }
+}
