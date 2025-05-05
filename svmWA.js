@@ -456,6 +456,10 @@ app.post('/ai/sendmessage', apiLimiter, async (req, res) => {
 });
 
 // Create a new group
+/*{
+  "groupName": "Test Group 2",
+  "participants": ["919344268155@c.us", "919976850245@c.us"]
+}*/
 app.post('/api/create-group', async (req, res) => {
     const { groupName, participants } = req.body;
 
@@ -476,6 +480,10 @@ app.post('/api/create-group', async (req, res) => {
 });
 
 // Add members to an existing group
+/*{
+  "groupName": "Test Group 2",
+  "members": ["919976850245@c.us"]
+}*/
 app.post('/api/add-members', async (req, res) => {
     let { groupId, groupName, members } = req.body;
 
@@ -537,15 +545,28 @@ app.post('/api/manage-admins', async (req, res) => {
 });
 
 // Send a message with media and tag members
+/*{
+  "groupName": "Test Group 2",
+  "message": "Hello team, please see the attached file.",
+  "mediaPath": "C:/Users/spora/Downloads/whatsapp-web.js/video/secureshutter.mp4",
+  "taggedMembers": ["919976850245@c.us"]
+}*/
 app.post('/api/send-media-message', async (req, res) => {
-    const { groupId, message, mediaPath, taggedMembers } = req.body;
+    const { groupId, groupName, message, mediaPath, taggedMembers } = req.body;
 
-    if (!groupId || !message || !mediaPath || !Array.isArray(taggedMembers)) {
-        return res.status(400).json({ error: 'groupId, message, mediaPath, and taggedMembers (array) are required' });
+    if ((!groupId && !groupName) || !message || !mediaPath || !Array.isArray(taggedMembers)) {
+        return res.status(400).json({ error: 'groupId or groupName, message, mediaPath, and taggedMembers (array) are required' });
     }
 
     try {
-        await sendMessageWithMedia(groupId, message, mediaPath, taggedMembers);
+        let resolvedGroupId = groupId;
+        if (!resolvedGroupId && groupName) {
+            resolvedGroupId = await getGroupIdByName(groupName);
+            if (!resolvedGroupId) {
+                return res.status(404).json({ error: `Group with name "${groupName}" not found` });
+            }
+        }
+        await sendMessageWithMedia(resolvedGroupId, message, mediaPath, taggedMembers);
         res.json({ success: true, message: 'Message sent successfully' });
     } catch (error) {
         console.error('Error sending message with media:', error);
@@ -572,6 +593,48 @@ app.post('/api/reply-message', async (req, res) => {
     } catch (error) {
         console.error('Error replying to message:', error);
         res.status(500).json({ error: 'Failed to send reply' });
+    }
+});
+
+// Function to remove members from a group
+async function removeMembersFromGroup(groupId, members) {
+    try {
+        const group = await client.getChatById(groupId);
+        await group.removeParticipants(members); // members is an array of WhatsApp IDs
+        console.log('Members removed successfully');
+    } catch (error) {
+        console.error('Error removing members:', error);
+        throw error;
+    }
+}
+
+// Endpoint to remove members from a group
+/*{
+  "groupName": "Test Group 2",
+  "members": ["919976850245@c.us"]
+}*/
+app.post('/api/remove-members', async (req, res) => {
+    let { groupId, groupName, members } = req.body;
+
+    if ((!groupId && !groupName) || !members || !Array.isArray(members)) {
+        return res.status(400).json({ error: 'groupId or groupName and members (array) are required' });
+    }
+
+    try {
+        // If groupName is provided, resolve groupId
+        if (!groupId && groupName) {
+            groupId = await getGroupIdByName(groupName);
+            console.log(`Resolved groupId: ${groupId}`);
+            if (!groupId) {
+                return res.status(404).json({ error: `Group with name "${groupName}" not found` });
+            }
+        }
+
+        await removeMembersFromGroup(groupId, members);
+        res.json({ success: true, message: 'Members removed successfully' });
+    } catch (error) {
+        console.error('Error removing members:', error);
+        res.status(500).json({ error: 'Failed to remove members' });
     }
 });
 
@@ -888,6 +951,7 @@ async function demoteFromAdmin(groupId, members) {
     }
 }
 
+// Function to send a message with media and tag members
 async function sendMessageWithMedia(groupId, message, mediaPath, taggedMembers) {
     try {
         const group = await client.getChatById(groupId);
@@ -895,9 +959,20 @@ async function sendMessageWithMedia(groupId, message, mediaPath, taggedMembers) 
         // Create media object
         const media = MessageMedia.fromFilePath(mediaPath);
 
-        // Format message with mentions
-        const mentions = taggedMembers.map(member => client.getContactById(member));
-        const formattedMessage = `${message}\n\n${taggedMembers.map(member => `@${member.split('@')[0]}`).join(' ')}`;
+        // Resolve mentions (must be Contact objects)
+        const mentions = [];
+        for (const member of taggedMembers) {
+            try {
+                const contact = await client.getContactById(member);
+                mentions.push(contact);
+            } catch (err) {
+                console.warn(`Could not resolve contact for ${member}`);
+            }
+        }
+
+        // Format message with @mentions
+        const mentionTags = mentions.map(c => `@${c.number}`).join(' ');
+        const formattedMessage = `${message}\n\n${mentionTags}`;
 
         // Send message with media and mentions
         await group.sendMessage(media, { caption: formattedMessage, mentions });
@@ -907,6 +982,30 @@ async function sendMessageWithMedia(groupId, message, mediaPath, taggedMembers) 
         throw error;
     }
 }
+
+// Endpoint to send a message with media and tag members
+app.post('/api/send-media-message', async (req, res) => {
+    const { groupId, groupName, message, mediaPath, taggedMembers } = req.body;
+
+    if ((!groupId && !groupName) || !message || !mediaPath || !Array.isArray(taggedMembers)) {
+        return res.status(400).json({ error: 'groupId or groupName, message, mediaPath, and taggedMembers (array) are required' });
+    }
+
+    try {
+        let resolvedGroupId = groupId;
+        if (!resolvedGroupId && groupName) {
+            resolvedGroupId = await getGroupIdByName(groupName);
+            if (!resolvedGroupId) {
+                return res.status(404).json({ error: `Group with name "${groupName}" not found` });
+            }
+        }
+        await sendMessageWithMedia(resolvedGroupId, message, mediaPath, taggedMembers);
+        res.json({ success: true, message: 'Message sent successfully' });
+    } catch (error) {
+        console.error('Error sending message with media:', error);
+        res.status(500).json({ error: 'Failed to send message with media' });
+    }
+});
 
 async function getGroupIdByName(groupName) {
     // Always refresh chatList before searching
