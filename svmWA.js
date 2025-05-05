@@ -477,12 +477,20 @@ app.post('/api/create-group', async (req, res) => {
 
 // Add members to an existing group
 app.post('/api/add-members', async (req, res) => {
-    const { groupId, members } = req.body;
+    let { groupId, groupName, members } = req.body;
 
-    if (!groupId || !members || !Array.isArray(members)) {
-        return res.status(400).json({ error: 'groupId and members (array) are required' });
+    if ((!groupId && !groupName) || !members || !Array.isArray(members)) {
+        return res.status(400).json({ error: 'groupId or groupName and members (array) are required' });
     }
 
+    // If groupName is provided, find the groupId
+    if (!groupId && groupName) {
+        groupId = await getGroupIdByName(groupName);
+        console.log(`Resolved groupId: ${groupId}`);
+        if (!groupId) {
+            return res.status(404).json({ error: `Group with name "${groupName}" not found` });
+        }
+    }
     try {
         await addMembersToGroup(groupId, members);
         res.json({ success: true, message: 'Members processed successfully' });
@@ -493,14 +501,28 @@ app.post('/api/add-members', async (req, res) => {
 });
 
 // Promote or demote group members to/from admin
+/*{
+  "groupName": "Test Group 2",
+  "members": ["919976850245@c.us"],
+  "action": "promote/demote"
+}*/
 app.post('/api/manage-admins', async (req, res) => {
-    const { groupId, members, action } = req.body;
+    let { groupId, groupName, members, action } = req.body;
 
-    if (!groupId || !members || !Array.isArray(members) || !['promote', 'demote'].includes(action)) {
-        return res.status(400).json({ error: 'groupId, members (array), and action (promote/demote) are required' });
+    if ((!groupId && !groupName) || !members || !Array.isArray(members) || !['promote', 'demote'].includes(action)) {
+        return res.status(400).json({ error: 'groupId or groupName, members (array), and action (promote/demote) are required' });
     }
 
     try {
+        // If groupName is provided, resolve groupId
+        if (!groupId && groupName) {
+            groupId = await getGroupIdByName(groupName);
+            console.log(`Resolved groupId: ${groupId}`);
+            if (!groupId) {
+                return res.status(404).json({ error: `Group with name "${groupName}" not found` });
+            }
+        }
+
         if (action === 'promote') {
             await promoteToAdmin(groupId, members);
             res.json({ success: true, message: 'Members promoted to admin successfully' });
@@ -708,10 +730,6 @@ wsServer1.listen(wsBroadcastserver, () => {
 });
 
 async function createGroup(groupName, participants) { 
-     /*{
-    "groupName": "Test Group",
-    "participants": ["919344268155@c.us"]
-  }*/
     try {
         // Ensure all participants are strings ending with @c.us
         const participantIds = participants.map(phoneNumber => 
@@ -720,38 +738,28 @@ async function createGroup(groupName, participants) {
         // Create the group
         const group = await client.createGroup(groupName, participantIds);
         console.log(`Group created: ${group.name}`);
-        return group;
-    } catch (error) {
-        console.error('Error creating group:', error);
-        throw error;
-    }
-}
 
-async function addMembersToGroup(groupId, members) {
-    try {
-        const group = await client.getChatById(groupId);
-        const restrictedNumbers = [];
-
-        for (const member of members) {
-            try {
-                await group.addParticipants([member]); // Attempt to add the member
-                console.log(`Member added successfully: ${member}`);
-            } catch (error) {
-                console.warn(`Could not add member ${member}:`, error.message);
-                restrictedNumbers.push(member); // Add to restricted list
-            }
+        // Defensive: Check if group.participants is an array
+        let addedIds = [];
+        if (Array.isArray(group.participants)) {
+            addedIds = group.participants.map(p => p.id._serialized);
+        } else if (group.participants && typeof group.participants === 'object') {
+            // Sometimes it's an object with participant IDs as keys
+            addedIds = Object.keys(group.participants);
+        } else {
+            console.warn('group.participants is not an array or object:', group.participants);
         }
 
-        if (restrictedNumbers.length > 0) {
-            console.log('Generating group invite link for restricted numbers...');
+        const notAdded = participantIds.filter(id => !addedIds.includes(id));
+
+        if (notAdded.length > 0) {
             const inviteCode = await group.getInviteCode();
             const inviteLink = `https://chat.whatsapp.com/${inviteCode}`;
-
-            for (const restrictedNumber of restrictedNumbers) {
+            for (const restrictedNumber of notAdded) {
                 try {
                     await client.sendMessage(
                         restrictedNumber,
-                        `Hi! You couldn't be added to the group "${group.name}" due to your privacy settings. Please join using this invite link: ${inviteLink}`
+                        `Hi 👋!\n\nYou couldn't be added to the group "${group.name}" due to your privacy settings.\n\nPlease join using this invite link:\n${inviteLink}\n\nIf you have any questions, reply to this message.`
                     );
                     console.log(`Invite link sent to ${restrictedNumber}`);
                 } catch (error) {
@@ -760,12 +768,103 @@ async function addMembersToGroup(groupId, members) {
             }
         }
 
-        console.log('All members processed successfully');
+        return {
+            group,
+            added: addedIds.length,
+            invited: notAdded.length
+        };
+    } catch (error) {
+        console.error('Error creating group:', error);
+        throw error;
+    }
+}
+
+// Helper: Always get the latest group ID by name
+async function getGroupIdByName(groupName) {
+    const chats = await client.getChats();
+    const group = chats.find(
+        chat => chat.isGroup && chat.name && chat.name.toLowerCase() === groupName.toLowerCase()
+    );
+    return group ? group.id._serialized : null;
+}
+
+// Main logic: Add members to group, handle privacy/invite link
+async function addMembersToGroup(groupId, members) {
+    try {
+        const group = await client.getChatById(groupId);
+        if (!group) throw new Error('Group not found by ID: ' + groupId);
+
+        // Only add numbers not already in the group
+        const existing = group.participants.map(p => p.id._serialized);
+        const toAdd = members
+            .map(num => num.endsWith('@c.us') ? num : `${num}@c.us`)
+            .filter(num => !existing.includes(num));
+
+        if (toAdd.length === 0) {
+            console.log('No new members to add.');
+            return { added: 0, invited: 0 };
+        }
+
+        const result = await group.addParticipants(toAdd);
+        console.log('addParticipants result:', result);
+
+        const restrictedNumbers = [];
+        for (const [participant, info] of Object.entries(result)) {
+            if (info.code !== 200) {
+                console.warn(`Could not add member ${participant}: code ${info.code}`);
+                restrictedNumbers.push(participant);
+            } else {
+                console.log(`Member added successfully: ${participant}`);
+            }
+        }
+
+        if (restrictedNumbers.length > 0) {
+            const inviteCode = await group.getInviteCode();
+            const inviteLink = `https://chat.whatsapp.com/${inviteCode}`;
+            for (const restrictedNumber of restrictedNumbers) {
+                try {
+                    await client.sendMessage(
+                        restrictedNumber,
+                        `Hi! You couldn't be added to the group "${group.name}" due to your privacy settings.\n\nPlease join using this invite link:\n${inviteLink}`
+                    );
+                    console.log(`Invite link sent to ${restrictedNumber}`);
+                } catch (error) {
+                    console.error(`Failed to send invite link to ${restrictedNumber}:`, error.message);
+                }
+            }
+        }
+
+        return { added: toAdd.length - restrictedNumbers.length, invited: restrictedNumbers.length };
     } catch (error) {
         console.error('Error adding members to group:', error);
         throw error;
     }
 }
+
+// Endpoint: Add members to an existing group (by groupId or groupName)
+app.post('/api/add-members', async (req, res) => {
+    let { groupId, groupName, members } = req.body;
+
+    if ((!groupId && !groupName) || !members || !Array.isArray(members)) {
+        return res.status(400).json({ error: 'groupId or groupName and members (array) are required' });
+    }
+
+    try {
+        // If groupName is provided, resolve groupId
+        if (!groupId && groupName) {
+            groupId = await getGroupIdByName(groupName);
+            console.log(`Resolved groupId: ${groupId}`);
+            if (!groupId) {
+                return res.status(404).json({ error: `Group with name "${groupName}" not found` });
+            }
+        }
+        const result = await addMembersToGroup(groupId, members);
+        res.json({ success: true, ...result, message: 'Members processed successfully' });
+    } catch (error) {
+        console.error('Error adding members:', error);
+        res.status(500).json({ error: 'Failed to process members', details: error.message });
+    }
+});
 
 async function promoteToAdmin(groupId, members) {
     try {
@@ -774,6 +873,17 @@ async function promoteToAdmin(groupId, members) {
         console.log('Members promoted to admin successfully');
     } catch (error) {
         console.error('Error promoting members:', error);
+        throw error;
+    }
+}
+
+async function demoteFromAdmin(groupId, members) {
+    try {
+        const group = await client.getChatById(groupId);
+        await group.demoteParticipants(members); // members is an array of phone numbers
+        console.log('Members demoted from admin successfully');
+    } catch (error) {
+        console.error('Error demoting members:', error);
         throw error;
     }
 }
@@ -796,4 +906,13 @@ async function sendMessageWithMedia(groupId, message, mediaPath, taggedMembers) 
         console.error('Error sending message with media:', error);
         throw error;
     }
+}
+
+async function getGroupIdByName(groupName) {
+    // Always refresh chatList before searching
+    chatList = await client.getChats();
+    const group = chatList.find(
+        chat => chat.isGroup && chat.name && chat.name.toLowerCase() === groupName.toLowerCase()
+    );
+    return group ? group.id._serialized : null;
 }
