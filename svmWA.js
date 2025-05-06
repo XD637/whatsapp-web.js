@@ -114,6 +114,7 @@ client.on('message', async (message) => {
     try {
         if (message.fromMe) return; // ignore self messages
 
+        // --- Secure keyword logic ---
         const keyword = "Secure";
         if (message.body.toLowerCase().trim() === keyword.toLowerCase()) {
             console.log(`Keyword "${keyword}" received from ${message.from}`);
@@ -125,59 +126,71 @@ client.on('message', async (message) => {
                 console.error('Video is not preloaded yet.');
                 await message.reply('Sorry, the video is currently unavailable.');
             }
-        };
+        }
 
-          
-        let senderName = ''; // Placeholder for name
-        const date = new Date(message.timestamp * 1000); // Convert from seconds to milliseconds
+        // --- Group message WebSocket broadcast ---
+        const chat = await message.getChat();
+        if (!chat.isGroup) return; // Only handle group messages
 
-        // Convert to Indian Standard Time (IST)
+        const contact = await message.getContact();
+        const senderName = contact.pushname || contact.verifiedName || contact.number;
+
+        // Format timestamp as "YYYY-MM-DD HH:mm:ss"
+        const date = new Date(message.timestamp * 1000);
         const options = { timeZone: 'Asia/Kolkata', year: 'numeric', month: '2-digit', day: '2-digit', 
-                  hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false };
-
+            hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false };
         const formatter = new Intl.DateTimeFormat('en-GB', options);
         const parts = formatter.formatToParts(date);
-
-        // Reformat the date to 'YYYY-MM-DD HH:MM:SS'
         const formattedTimestamp = `${parts.find(p => p.type === 'year').value}-${parts.find(p => p.type === 'month').value}-${parts.find(p => p.type === 'day').value} ${parts.find(p => p.type === 'hour').value}:${parts.find(p => p.type === 'minute').value}:${parts.find(p => p.type === 'second').value}`;
 
-        // Check if the message is from a group or an individual
-        // if (message.isGroupMsg) {
-            // Fetch group details to get the group name
-            const chat = await message.getChat();
-            senderName = chat.name || chat.pushname || "Unknown Chat" ; // Group name
-        // } else {
-        //     // Fetch contact details to get the saved name
-        //     const contact = await message.getContact();
-        //     console.log(`${contact.pushname}   ${contact.verifiedName}  ${contact.number}`)
-        //     senderName = contact.pushname || contact.verifiedName || contact.number; // Saved name or fallback to number
-        // }
-         const forwardedMessage = {
-            from: senderName,
-            body: message.body,
-            timestamp: formattedTimestamp
+        // Mentions
+        const mentions = message.mentionedIds && message.mentionedIds.length > 0 ? message.mentionedIds : undefined;
+
+        // Reply info
+        let replyTo = undefined;
+        if (message.hasQuotedMsg) {
+            const quotedMsg = await message.getQuotedMessage();
+            replyTo = {
+                from: quotedMsg.author || quotedMsg.from,
+                messageId: quotedMsg.id._serialized
+            };
+        }
+
+        // Build payload in your requested format
+        const groupMessagePayload = {
+            type: "NEW_MESSAGE",
+            data: {
+                from: senderName,
+                group: chat.name,
+                body: message.body,
+                timestamp: formattedTimestamp,
+                ...(mentions && { mentions }),
+                ...(replyTo && { replyTo })
+            }
         };
-        await broadcastMessageToClients(forwardedMessage); // Forward to WebSocket clients
+
+        broadcastMessageToClients(groupMessagePayload);
+
     } catch (error) {
         console.error('Error handling message:', error);
     }
 });
 
-client.on('message', async (message) => {
-    try {
-        if (message.hasQuotedMsg) {
-            const quotedMsg = await message.getQuotedMessage();
-            const sender = quotedMsg.from; // The original sender of the quoted message
-            const reply = message.body;
+// client.on('message', async (message) => {
+//     try {
+//         if (message.hasQuotedMsg) {
+//             const quotedMsg = await message.getQuotedMessage();
+//             const sender = quotedMsg.from; // The original sender of the quoted message
+//             const reply = message.body;
 
-            // Forward the reply to the original sender
-            await client.sendMessage(sender, `Reply to your message: ${reply}`);
-            console.log('Reply forwarded to the original sender');
-        }
-    } catch (error) {
-        console.error('Error handling reply:', error);
-    }
-});
+//             // Forward the reply to the original sender
+//             await client.sendMessage(sender, `Reply to your message: ${reply}`);
+//             console.log('Reply forwarded to the original sender');
+//         }
+//     } catch (error) {
+//         console.error('Error handling reply:', error);
+//     }
+// }); 
 
 async function sendMessageToNumber(number, message, mediaPath) {
     try {
@@ -549,14 +562,17 @@ app.post('/api/manage-admins', async (req, res) => {
   "groupName": "Test Group 2",
   "message": "Hello team, please see the attached file.",
   "mediaPath": "C:/Users/spora/Downloads/whatsapp-web.js/video/secureshutter.mp4",
-  "taggedMembers": ["919976850245@c.us"]
+  "taggedMembers": ["919976850245@c.us"] (optional)
 }*/
 app.post('/api/send-media-message', async (req, res) => {
     const { groupId, groupName, message, mediaPath, taggedMembers } = req.body;
 
-    if ((!groupId && !groupName) || !message || !mediaPath || !Array.isArray(taggedMembers)) {
-        return res.status(400).json({ error: 'groupId or groupName, message, mediaPath, and taggedMembers (array) are required' });
+    if ((!groupId && !groupName) || !message || !mediaPath) {
+        return res.status(400).json({ error: 'groupId or groupName, message, and mediaPath are required' });
     }
+
+    // Make taggedMembers optional and always an array
+    const safeTaggedMembers = Array.isArray(taggedMembers) ? taggedMembers : [];
 
     try {
         let resolvedGroupId = groupId;
@@ -566,7 +582,7 @@ app.post('/api/send-media-message', async (req, res) => {
                 return res.status(404).json({ error: `Group with name "${groupName}" not found` });
             }
         }
-        await sendMessageWithMedia(resolvedGroupId, message, mediaPath, taggedMembers);
+        await sendMessageWithMedia(resolvedGroupId, message, mediaPath, safeTaggedMembers);
         res.json({ success: true, message: 'Message sent successfully' });
     } catch (error) {
         console.error('Error sending message with media:', error);
@@ -635,6 +651,42 @@ app.post('/api/remove-members', async (req, res) => {
     } catch (error) {
         console.error('Error removing members:', error);
         res.status(500).json({ error: 'Failed to remove members' });
+    }
+});
+
+// Update group profile picture
+/*{
+  "groupName": "Test Group 2", // or "groupId": "1203634...@g.us"
+  "imagePath": "C:/Users/spora/Downloads/whatsapp-web.js/sporadapfp.jpg" - (give this path always)
+}*/
+app.post('/api/update-group-picture', async (req, res) => {
+    const { groupId, groupName, imagePath } = req.body;
+
+    if ((!groupId && !groupName) || !imagePath) {
+        return res.status(400).json({ error: 'groupId or groupName and imagePath are required' });
+    }
+
+    try {
+        let resolvedGroupId = groupId;
+        if (!resolvedGroupId && groupName) {
+            resolvedGroupId = await getGroupIdByName(groupName);
+            if (!resolvedGroupId) {
+                return res.status(404).json({ error: `Group with name "${groupName}" not found` });
+            }
+        }
+
+        if (!fs.existsSync(imagePath)) {
+            return res.status(400).json({ error: 'Image file does not exist at the specified path' });
+        }
+
+        const group = await client.getChatById(resolvedGroupId);
+        const media = MessageMedia.fromFilePath(imagePath);
+
+        await group.setPicture(media);
+        res.json({ success: true, message: 'Group profile picture updated successfully' });
+    } catch (error) {
+        console.error('Error updating group profile picture:', error);
+        res.status(500).json({ error: 'Failed to update group profile picture' });
     }
 });
 
@@ -952,7 +1004,7 @@ async function demoteFromAdmin(groupId, members) {
 }
 
 // Function to send a message with media and tag members
-async function sendMessageWithMedia(groupId, message, mediaPath, taggedMembers) {
+async function sendMessageWithMedia(groupId, message, mediaPath, taggedMembers = []) {
     try {
         const group = await client.getChatById(groupId);
 
@@ -961,21 +1013,26 @@ async function sendMessageWithMedia(groupId, message, mediaPath, taggedMembers) 
 
         // Resolve mentions (must be Contact objects)
         const mentions = [];
-        for (const member of taggedMembers) {
-            try {
-                const contact = await client.getContactById(member);
-                mentions.push(contact);
-            } catch (err) {
-                console.warn(`Could not resolve contact for ${member}`);
+        if (Array.isArray(taggedMembers) && taggedMembers.length > 0) {
+            for (const member of taggedMembers) {
+                try {
+                    const contact = await client.getContactById(member);
+                    mentions.push(contact);
+                } catch (err) {
+                    console.warn(`Could not resolve contact for ${member}`);
+                }
             }
         }
 
-        // Format message with @mentions
-        const mentionTags = mentions.map(c => `@${c.number}`).join(' ');
-        const formattedMessage = `${message}\n\n${mentionTags}`;
+        // Format message with @mentions if any
+        const mentionTags = mentions.length > 0 ? '\n\n' + mentions.map(c => `@${c.number}`).join(' ') : '';
+        const formattedMessage = `${message}${mentionTags}`;
 
-        // Send message with media and mentions
-        await group.sendMessage(media, { caption: formattedMessage, mentions });
+        // Send message with or without mentions
+        await group.sendMessage(media, mentions.length > 0
+            ? { caption: formattedMessage, mentions }
+            : { caption: formattedMessage }
+        );
         console.log('Message sent successfully');
     } catch (error) {
         console.error('Error sending message with media:', error);
@@ -987,9 +1044,12 @@ async function sendMessageWithMedia(groupId, message, mediaPath, taggedMembers) 
 app.post('/api/send-media-message', async (req, res) => {
     const { groupId, groupName, message, mediaPath, taggedMembers } = req.body;
 
-    if ((!groupId && !groupName) || !message || !mediaPath || !Array.isArray(taggedMembers)) {
-        return res.status(400).json({ error: 'groupId or groupName, message, mediaPath, and taggedMembers (array) are required' });
+    if ((!groupId && !groupName) || !message || !mediaPath) {
+        return res.status(400).json({ error: 'groupId or groupName, message, and mediaPath are required' });
     }
+
+    // Make taggedMembers optional and always an array
+    const safeTaggedMembers = Array.isArray(taggedMembers) ? taggedMembers : [];
 
     try {
         let resolvedGroupId = groupId;
@@ -999,7 +1059,7 @@ app.post('/api/send-media-message', async (req, res) => {
                 return res.status(404).json({ error: `Group with name "${groupName}" not found` });
             }
         }
-        await sendMessageWithMedia(resolvedGroupId, message, mediaPath, taggedMembers);
+        await sendMessageWithMedia(resolvedGroupId, message, mediaPath, safeTaggedMembers);
         res.json({ success: true, message: 'Message sent successfully' });
     } catch (error) {
         console.error('Error sending message with media:', error);
@@ -1015,3 +1075,58 @@ async function getGroupIdByName(groupName) {
     );
     return group ? group.id._serialized : null;
 }
+
+// // Store messageId -> userId mapping
+// const messageUserMap = new Map();
+
+// // Listen for all incoming messages
+// client.on('message', async (message) => {
+//     try {
+//         const chat = await message.getChat();
+//         if (!chat.isGroup) return; // Only handle group messages
+
+//         // Get sender's display name (pushname/verifiedName/number)
+//         const contact = await message.getContact();
+//         const senderName = contact.pushname || contact.verifiedName || contact.number;
+
+//         // Format timestamp as "YYYY-MM-DD HH:mm:ss"
+//         const date = new Date(message.timestamp * 1000);
+//         const options = { timeZone: 'Asia/Kolkata', year: 'numeric', month: '2-digit', day: '2-digit', 
+//             hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false };
+//         const formatter = new Intl.DateTimeFormat('en-GB', options);
+//         const parts = formatter.formatToParts(date);
+//         const formattedTimestamp = `${parts.find(p => p.type === 'year').value}-${parts.find(p => p.type === 'month').value}-${parts.find(p => p.type === 'day').value} ${parts.find(p => p.type === 'hour').value}:${parts.find(p => p.type === 'minute').value}:${parts.find(p => p.type === 'second').value}`;
+
+//         // Mentions
+//         const mentions = message.mentionedIds && message.mentionedIds.length > 0 ? message.mentionedIds : undefined;
+
+//         // Reply info
+//         let replyTo = undefined;
+//         if (message.hasQuotedMsg) {
+//             const quotedMsg = await message.getQuotedMessage();
+//             replyTo = {
+//                 from: quotedMsg.author || quotedMsg.from,
+//                 messageId: quotedMsg.id._serialized
+//             };
+//         }
+
+//         // Build payload in your requested format
+//         const groupMessagePayload = {
+//             type: "NEW_MESSAGE",
+//             data: {
+//                 from: senderName,
+//                 group: chat.name,
+//                 body: message.body,
+//                 timestamp: formattedTimestamp,
+//                 ...(mentions && { mentions }),
+//                 ...(replyTo && { replyTo })
+//             }
+//         };
+
+//         // Send only this one message per group message
+//         broadcastMessageToClients(groupMessagePayload);
+
+//     } catch (error) {
+//         console.error('Error in group message handler:', error);
+//     }
+// });
