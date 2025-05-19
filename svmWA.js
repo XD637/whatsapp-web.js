@@ -181,29 +181,29 @@ client.on("message", async (message) => {
 
 //spammingh issue
 
-client.on('message', async (message) => {
-  try {
-    if (message.fromMe) return;
+// client.on('message', async (message) => {
+//   try {
+//     if (message.fromMe) return;
 
-    const keyword = "Secure";
-    const trimmedBody = message.body.toLowerCase().trim();
+//     const keyword = "Secure";
+//     const trimmedBody = message.body.toLowerCase().trim();
 
-    // Handle "Secure" keyword first
-    if (trimmedBody === keyword.toLowerCase()) {
-      if (cachedMedia) {
-        await message.reply('Thanks for Your Enquiry. Kindly find Secure-Shutter Explainer Video:');
-        await client.sendMessage(message.from, cachedMedia);
-      } else {
-        console.error('Video is not preloaded yet.');
-        await message.reply('Sorry, the video is currently unavailable.');
-      }
-      return; // Exit early after handling keyword
-    }
-  }
- catch (error) {
-    console.error('Error handling message:', error);
-  }
-});
+//     // Handle "Secure" keyword first
+//     if (trimmedBody === keyword.toLowerCase()) {
+//       if (cachedMedia) {
+//         await message.reply('Thanks for Your Enquiry. Kindly find Secure-Shutter Explainer Video:');
+//         await client.sendMessage(message.from, cachedMedia);
+//       } else {
+//         console.error('Video is not preloaded yet.');
+//         await message.reply('Sorry, the video is currently unavailable.');
+//       }
+//       return; // Exit early after handling keyword
+//     }
+//   }
+//  catch (error) {
+//     console.error('Error handling message:', error);
+//   }
+// });
 
 
 async function sendMessageToNumber(number, message, mediaPath) {
@@ -277,10 +277,9 @@ function getMimeType(filePath) {
 
 async function sendApiMessage(grpName, msgText, msgMedia, attempt = 1) {
     try {
-        if (!chatList) {
-            console.error("Chat list is not initialized");
-            return "Chat list is not initialized";
-        }
+        if (!chatList || !Array.isArray(chatList)) {
+            console.log("Chat list is empty or not an array. Fetching...");
+            chatList = await updateChatList();}
 
         for (let i = 0; i < chatList.length; i++) {
             const element = chatList[i];
@@ -288,7 +287,7 @@ async function sendApiMessage(grpName, msgText, msgMedia, attempt = 1) {
             if (
                 element.isGroup &&
                 element.name &&
-                element.name.includes(grpName)
+                element.name.toLowerCase() === grpName.toLowerCase() //changed
             ) {
                 const chat = await client.getChatById(element.id._serialized);
 
@@ -978,26 +977,6 @@ async function broadcastMessageToClients(message) {
     });
 }
 
-// Handle new WebSocket connections
-wss1.on("connection", (ws) => {
-    console.log("New WebSocket client connected");
-    connectedClients.add(ws);
-
-    // Remove client on disconnection
-    ws.on("close", () => {
-        console.log("WebSocket client disconnected");
-        connectedClients.delete(ws);
-    });
-
-    // Optional: Handle incoming WebSocket messages
-    ws.on("message", (message) => {
-        console.log("Message received from WebSocket client:", message);
-    });
-});
-
-wsServer1.listen(wsBroadcastserver, () => {
-    console.log(`Broadcast server is running on port ${wsBroadcastserver}`);
-});
 
 async function createGroup(groupName, participants) {
     try {
@@ -1292,57 +1271,82 @@ async function getGroupIdByName(groupName) {
     return group ? group.id._serialized : null;
 }
 
-// // Store messageId -> userId mapping
-// const messageUserMap = new Map();
 
-// // Listen for all incoming messages
-// client.on('message', async (message) => {
-//     try {
-//         const chat = await message.getChat();
-//         if (!chat.isGroup) return; // Only handle group messages
+// Handle new WebSocket connections
+wss1.on("connection", (ws) => {
+    console.log("New WebSocket client connected");
+    connectedClients.add(ws);
 
-//         // Get sender's display name (pushname/verifiedName/number)
-//         const contact = await message.getContact();
-//         const senderName = contact.pushname || contact.verifiedName || contact.number;
+    // Remove client on disconnection
+    ws.on("close", () => {
+        console.log("WebSocket client disconnected");
+        connectedClients.delete(ws);
+    });
 
-//         // Format timestamp as "YYYY-MM-DD HH:mm:ss"
-//         const date = new Date(message.timestamp * 1000);
-//         const options = { timeZone: 'Asia/Kolkata', year: 'numeric', month: '2-digit', day: '2-digit',
-//             hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false };
-//         const formatter = new Intl.DateTimeFormat('en-GB', options);
-//         const parts = formatter.formatToParts(date);
-//         const formattedTimestamp = `${parts.find(p => p.type === 'year').value}-${parts.find(p => p.type === 'month').value}-${parts.find(p => p.type === 'day').value} ${parts.find(p => p.type === 'hour').value}:${parts.find(p => p.type === 'minute').value}:${parts.find(p => p.type === 'second').value}`;
+    // Optional: Handle incoming WebSocket messages
+    ws.on("message", (message) => {
+        console.log("Message received from WebSocket client:", message);
+    });
+});
 
-//         // Mentions
-//         const mentions = message.mentionedIds && message.mentionedIds.length > 0 ? message.mentionedIds : undefined;
+wsServer1.listen(wsBroadcastserver, () => {
+    console.log(`Broadcast server is running on port ${wsBroadcastserver}`);
+});
 
-//         // Reply info
-//         let replyTo = undefined;
-//         if (message.hasQuotedMsg) {
-//             const quotedMsg = await message.getQuotedMessage();
-//             replyTo = {
-//                 from: quotedMsg.author || quotedMsg.from,
-//                 messageId: quotedMsg.id._serialized
-//             };
-//         }
+// Function to send a message with media to multiple numbers with a delay
+async function sendMessagesWithDelay(numbers, messageText, mediaPath) {
+    try {
+        if (!fs.existsSync(mediaPath)) {
+            console.error(`Media file does not exist at path: ${mediaPath}`);
+            return "Media file does not exist";
+        }
 
-//         // Build payload in your requested format
-//         const groupMessagePayload = {
-//             type: "NEW_MESSAGE",
-//             data: {
-//                 from: senderName,
-//                 group: chat.name,
-//                 body: message.body,
-//                 timestamp: formattedTimestamp,
-//                 ...(mentions && { mentions }),
-//                 ...(replyTo && { replyTo })
-//             }
-//         };
+        const media = MessageMedia.fromFilePath(mediaPath);
 
-//         // Send only this one message per group message
-//         broadcastMessageToClients(groupMessagePayload);
+        for (const number of numbers) {
+            const formattedNumber = `${number}@c.us`; // Format the number
+            console.log(`Sending message to ${formattedNumber}`);
 
-//     } catch (error) {
-//         console.error('Error in group message handler:', error);
-//     }
-// });
+            try {
+                const chat = await client.getChatById(formattedNumber);
+                await chat.sendMessage(media, {
+                    caption: messageText,
+                });
+                console.log(`Message sent to ${formattedNumber}`);
+            } catch (error) {
+                console.error(`Failed to send message to ${formattedNumber}:`, error.message);
+            }
+
+            // Wait for 5 seconds before sending the next message
+            await new Promise((resolve) => setTimeout(resolve, 5000));
+        }
+
+        return "Messages sent successfully";
+    } catch (error) {
+        console.error("Error sending messages with delay:", error);
+        throw error;
+    }
+}
+
+// API to send messages with media to multiple numbers with a delay
+
+app.post("/api/send-messages-with-delay", async (req, res) => {
+    const { numbers, messageText, mediaPath } = req.body;
+
+    if (!numbers || !Array.isArray(numbers) || !messageText || !mediaPath) {
+        return res.status(400).json({
+            error: "numbers (array), messageText, and mediaPath are required",
+        });
+    }
+
+    // Format numbers to include country code (91) and WhatsApp format (@c.us)
+    const formattedNumbers = numbers.map((num) => `91${num}`);
+
+    try {
+        const result = await sendMessagesWithDelay(formattedNumbers, messageText, mediaPath);
+        res.json({ success: true, message: result });
+    } catch (error) {
+        console.error("Error in /api/send-messages-with-delay:", error);
+        res.status(500).json({ error: "Failed to send messages" });
+    }
+});
